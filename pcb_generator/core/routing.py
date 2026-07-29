@@ -58,15 +58,15 @@ class Trace:
 
 @dataclass
 class RouteConfig:
-    grid_pitch: float = 0.6
+    grid_pitch: float = 0.5
     """Router grid spacing. Must exceed trace_width + clearance."""
 
-    trace_width: float = 0.25
-    power_trace_width: float = 0.5
+    trace_width: float = 0.2
+    power_trace_width: float = 0.45
     power_fraction: float = 0.15
     """Share of traces drawn at the wider power width."""
 
-    clearance: float = 0.25
+    clearance: float = 0.2
     edge_margin: float = 1.0
     """Keep traces this far in from the board edge and any cutout."""
 
@@ -436,10 +436,11 @@ def generate_traces(
         return result
 
     board_area = geometry.shape_area(outer, holes)
-    # Roughly one net per 12 mm^2 at density 1.0 — tuned to read as a moderately
-    # busy consumer board rather than a backplane.
-    net_count = int(max(4, board_area / 12.0 * config.density))
-    net_count = min(net_count, 900)
+    # Roughly one net per 6 mm^2 at density 1.0. Tuned by rendering: sparser
+    # than this and the board reads as a blank slab with a few lines on it,
+    # because only the top-layer share of these nets is ever visible.
+    net_count = int(max(4, board_area / 6.0 * config.density))
+    net_count = min(net_count, 1600)
 
     hub_count = config.hub_count or max(3, int(math.sqrt(board_area) / 4.0))
     hubs = _pick_hubs(grid, rng, hub_count)

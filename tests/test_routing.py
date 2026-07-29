@@ -30,7 +30,7 @@ def test_keepout_margin_expands_the_region():
 
 
 def test_generate_traces_produces_routes():
-    result = routing.generate_traces(BOARD, config=RouteConfig(seed=1))
+    result = routing.generate_traces(BOARD, config=RouteConfig(seed=1, density=0.5))
     assert result.routed > 0
     assert result.success_rate > 0.2
     for trace in result.traces:
@@ -39,7 +39,7 @@ def test_generate_traces_produces_routes():
 
 
 def test_traces_stay_inside_the_board_with_margin():
-    config = RouteConfig(seed=3, edge_margin=1.0)
+    config = RouteConfig(seed=3, edge_margin=1.0, density=0.5)
     result = routing.generate_traces(BOARD, config=config)
     assert result.routed > 0
 
@@ -55,7 +55,7 @@ def test_traces_stay_inside_the_board_with_margin():
 def test_traces_avoid_keepouts():
     keepout = Keepout(center=(20.0, 15.0), width=12.0, height=8.0)
     result = routing.generate_traces(
-        BOARD, keepouts=[keepout], config=RouteConfig(seed=7)
+        BOARD, keepouts=[keepout], config=RouteConfig(seed=7, density=0.5)
     )
     assert result.routed > 0
 
@@ -86,7 +86,7 @@ def test_density_scales_trace_count():
 
 def test_traces_do_not_overlap_on_the_same_layer():
     """Routed cells are consumed per layer, so no two traces share a position."""
-    config = RouteConfig(seed=11)
+    config = RouteConfig(seed=11, density=0.5)
     result = routing.generate_traces(BOARD, config=config)
     assert result.routed > 0
 
@@ -101,7 +101,7 @@ def test_traces_do_not_overlap_on_the_same_layer():
 
 def test_router_uses_both_layers_to_get_past_congestion():
     """Single-layer routing deadlocks; layers and vias are what prevent it."""
-    result = routing.generate_traces(BOARD, config=RouteConfig(seed=11))
+    result = routing.generate_traces(BOARD, config=RouteConfig(seed=11, density=0.5))
     layers = {t.layer for t in result.traces}
     assert layers == {routing.LAYER_TOP, routing.LAYER_BOTTOM}
     assert result.vias
@@ -114,7 +114,7 @@ def test_layering_lifts_the_success_rate():
 
 
 def test_traces_start_on_the_top_layer():
-    result = routing.generate_traces(BOARD, config=RouteConfig(seed=13))
+    result = routing.generate_traces(BOARD, config=RouteConfig(seed=13, density=0.5))
     assert result.traces
     assert result.traces[0].layer == routing.LAYER_TOP
 
@@ -140,13 +140,16 @@ def test_power_traces_are_wider():
         SMALL, config=RouteConfig(seed=4, power_fraction=1.0)
     )
     assert result.routed > 0
-    assert all(t.width == pytest.approx(0.5) for t in result.traces)
+    assert all(
+        t.width == pytest.approx(RouteConfig().power_trace_width)
+        for t in result.traces
+    )
 
 
 def test_holes_block_routing():
     hole = geometry.as_cw([(15.0, 10.0), (25.0, 10.0), (25.0, 20.0), (15.0, 20.0)])
     result = routing.generate_traces(
-        BOARD, holes=[hole], config=RouteConfig(seed=6)
+        BOARD, holes=[hole], config=RouteConfig(seed=6, density=0.5)
     )
     assert result.routed > 0
     for trace in result.traces:
