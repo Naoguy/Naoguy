@@ -25,6 +25,7 @@ from bpy.props import (
 from bpy.types import Object, PropertyGroup
 
 from ..core import units
+from ..parts import library
 from ..shading import materials
 
 Vec2 = Tuple[float, float]
@@ -66,6 +67,17 @@ SIDE_ITEMS = [
     ("TOP", "Top", "Mounted on the top of the board"),
     ("BOTTOM", "Bottom", "Mounted on the underside of the board"),
 ]
+
+
+def _part_enum_items(self, context):
+    """Parts for the panel dropdown.
+
+    Deliberately a module-level function, not a lambda in the annotation:
+    ``from __future__ import annotations`` turns every property annotation into
+    a string that Blender evaluates later, and a lambda created inside that eval
+    does not get this module's globals — it raises NameError on first draw.
+    """
+    return library.enum_items(notable_only=True)
 
 
 def _tag_redraw(self, context) -> None:
@@ -239,7 +251,11 @@ class PCBSceneProperties(PropertyGroup):
 
     active_board: PointerProperty(name="Active Board", type=Object)
 
-    add_part_key: StringProperty(name="Part", default="usb_c")
+    add_part_key: EnumProperty(
+        name="Part",
+        items=_part_enum_items,
+        description="Part that Place Component and Add Component will use",
+    )
 
     add_anchor: EnumProperty(name="Anchor", items=ANCHOR_ITEMS, default="FREE")
 

@@ -182,6 +182,8 @@ class PCB_PT_components(_PCBPanel, Panel):
         board = properties.find_board(context)
         scene_props = context.scene.pcb
 
+        layout.prop(scene_props, "add_part_key", text="")
+
         column = layout.column(align=True)
         column.scale_y = 1.2
         column.operator("pcb.place_component", icon="MOUSE_MOVE")

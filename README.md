@@ -41,9 +41,10 @@ The tool lives in the 3D viewport sidebar (`N`) under the **PCB** tab.
 
 **2. Give it a look.** Soldermask colour, surface finish, gloss.
 
-**3. Place the parts that matter.** *Place Component* is interactive — move the
+**3. Place the parts that matter.** Pick the part from the dropdown at the top
+of the Components panel, then either *Place Component* (interactive — move the
 mouse, `R` rotates, `E` snaps to the board edge, `F` flips side, click to
-confirm. Parts can be bound to:
+confirm) or *Add Component* (drops it at the 3D cursor). Parts can be bound to:
 
 - an **edge**, by position along the outline, so they follow when the shape
   changes;

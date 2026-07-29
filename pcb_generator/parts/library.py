@@ -187,6 +187,51 @@ def filler_parts() -> List[PartDef]:
     return [p for p in _REGISTRY.values() if not p.notable]
 
 
+# Blender reads enum item strings straight from Python memory, so the built
+# list has to be kept alive or the UI shows garbage. Caching it is the standard
+# guard, and it doubles as the single source of truth for every part dropdown.
+_ENUM_CACHE: Dict[bool, List[Tuple[str, str, str]]] = {}
+
+
+def enum_items(notable_only: bool = True) -> List[Tuple[str, str, str]]:
+    """Parts as Blender enum items, grouped into categories by separators."""
+    cached = _ENUM_CACHE.get(notable_only)
+    if cached is not None:
+        return cached
+
+    items: List[Tuple[str, str, str]] = []
+    source = notable_parts() if notable_only else all_parts()
+
+    first = True
+    for category in categories():
+        parts = [p for p in source if p.category == category]
+        if not parts:
+            continue
+
+        # Separators go *between* categories only. A leading separator becomes
+        # item zero, so the enum's default resolves to an empty identifier and
+        # anything reading it without opening the dropdown gets nothing.
+        if not first:
+            items.append(("", category, ""))
+        first = False
+
+        for part in parts:
+            items.append(
+                (
+                    part.key,
+                    part.label,
+                    part.description
+                    or f"{part.width:.1f} x {part.depth:.1f} x {part.height:.1f} mm",
+                )
+            )
+
+    if not items:
+        items.append(("NONE", "No parts", ""))
+
+    _ENUM_CACHE[notable_only] = items
+    return items
+
+
 def categories() -> List[str]:
     seen: List[str] = []
     for part in _REGISTRY.values():

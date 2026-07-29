@@ -17,46 +17,18 @@ from ..core import placement as core_placement
 from ..data import properties
 from ..parts import library
 
-# Enum item strings must be kept alive by Python or Blender will read freed
-# memory. Caching the built list is the standard guard.
-_PART_ITEMS_CACHE: List[Tuple[str, str, str]] = []
-
-
-def _part_items(self, context):
-    _PART_ITEMS_CACHE.clear()
-
-    first = True
-    for category in library.categories():
-        parts = [p for p in library.notable_parts() if p.category == category]
-        if not parts:
-            continue
-
-        # Separators go *between* categories only. A leading separator becomes
-        # item zero, so the enum's default resolves to the empty identifier and
-        # the operator fails the moment anyone runs it without opening the
-        # dropdown first.
-        if not first:
-            _PART_ITEMS_CACHE.append(("", category, ""))
-        first = False
-
-        for part in parts:
-            _PART_ITEMS_CACHE.append(
-                (
-                    part.key,
-                    part.label,
-                    part.description
-                    or f"{part.width:.1f} x {part.depth:.1f} x {part.height:.1f} mm",
-                )
-            )
-
-    if not _PART_ITEMS_CACHE:
-        _PART_ITEMS_CACHE.append(("NONE", "No parts", ""))
-
-    return _PART_ITEMS_CACHE
-
 
 def _resolve_part_key(key: str, scene_props) -> str:
-    """Fall back to something real if the enum handed us a separator."""
+    """Decide which part an operator should build.
+
+    An explicit key wins, so the operators stay scriptable. Otherwise the panel
+    dropdown decides — which is what a button press does, since the operators
+    default to an empty key.
+
+    Resolution happens in ``execute`` rather than ``invoke`` on purpose:
+    Blender skips ``invoke`` in background mode, so seeding there would make
+    scripted runs quietly behave differently from clicks.
+    """
     if key and library.get(key) is not None:
         return key
     if library.get(scene_props.add_part_key) is not None:
@@ -100,7 +72,11 @@ class PCB_OT_add_component(Operator):
     bl_description = "Add a component to the active board"
     bl_options = {"REGISTER", "UNDO"}
 
-    part_key: EnumProperty(name="Part", items=_part_items)
+    part_key: StringProperty(
+        name="Part",
+        default="",
+        description="Part key. Empty uses the part chosen in the PCB panel",
+    )
     anchor: EnumProperty(
         name="Anchor",
         items=[
@@ -174,7 +150,11 @@ class PCB_OT_place_component(Operator):
     )
     bl_options = {"REGISTER", "UNDO"}
 
-    part_key: EnumProperty(name="Part", items=_part_items)
+    part_key: StringProperty(
+        name="Part",
+        default="",
+        description="Part key. Empty uses the part chosen in the PCB panel",
+    )
 
     _obj: Optional[bpy.types.Object] = None
     _board: Optional[bpy.types.Object] = None
