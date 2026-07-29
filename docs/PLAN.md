@@ -1,68 +1,51 @@
 # Blender PCB Generator — Build Plan
 
-Status: **draft, revised for visualization-first scope**. Open decisions live in
+Status: **draft, revised for the simplified brief.** Open decisions in
 [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md).
 
 ---
 
 ## 1. What we're building
 
-A Blender extension that generates **believable PCBs for renders** — boards
-shaped to fit a specific product cavity, populated with parts that land exactly
-where the surrounding hardware needs them.
+Give it a shape. Get back a believable PCB.
 
-The problem it solves: library PCB models never fit. Wrong outline, wrong size,
-connectors in the wrong place, no relationship to the product they're supposed
-to live inside. You end up either modeling a board by hand every time or
-accepting one that visibly doesn't belong.
+That's the whole tool. You've already decided where the board goes and what it
+looks like — the generator's job is to turn that shape into something that reads
+as a real circuit board in a render.
 
-### The driving case
+**The loop:**
 
-A PCB inside a headset, sitting next to an audio driver, carrying:
+```
+shape  →  board  →  materials  →  procedural detail  →  scattered parts  →  placed parts
+                                  traces, silkscreen,    random fill        ports, buttons —
+                                  pads, vias                                exact control
+```
 
-- a USB port at a specific shell opening
-- tactile switches that must sit directly under external plastic buttons that
-  are modeled elsewhere and **not** in this generator's scope
-- possibly a wire/cable run off the board
-- everything else — traces, silkscreen, passives — as visual texture
-
-Everything in this plan is weighted toward that case being excellent.
-
-### What "believable" means here
-
-Nobody counts your pads in a render. What reads as *wrong* is: a board that
-doesn't follow its cavity, connectors that don't line up with shell openings,
-buttons that don't sit under their caps, a uniformly green rectangle with no
-trace detail, or parts at implausible scale. Those are the targets — not
-electrical correctness.
+Everything below serves that pipeline. Nothing analyzes cavities, avoids
+obstacles, or decides where your board should be — that's your call, already
+made.
 
 ---
 
 ## 2. Non-goals
 
-Sharpened now that this is visualization-only:
-
-- **No fabrication output.** No Gerbers, no DXF, no `.kicad_pcb`, no placement
-  files. Nothing here is manufacturable and it doesn't need to be.
-- **No electrical correctness.** No netlists, no real routing, no DRC. Traces
-  are decoration that follows plausible rules.
-- **No EDA interoperability.** Not a KiCad front-end.
-- **Not the enclosure.** Shell, buttons caps, driver housing are modeled
-  elsewhere. This generator *reads* them as context and *matches* them.
-
-Dropping fab output removes roughly a full phase of work from the previous plan
-and redirects it into visual detail, which is where the value actually is.
+- **No fabrication output.** No Gerbers, DXF, KiCad, placement files.
+- **No electrical correctness.** Traces are decoration following plausible rules.
+- **No shape authoring assistance.** No fit-to-cavity, no obstacle avoidance, no
+  volume analysis. You bring the shape.
+- **Not the enclosure.** Shells and button caps are modeled elsewhere; the
+  generator can *reference* them for placement but never generates them.
 
 ---
 
 ## 3. Target platform
 
-| Item | Choice | Rationale |
-|---|---|---|
-| Blender | 4.2 LTS minimum, developed on 5.2 LTS | 4.2 is the first extension-platform release |
-| Packaging | Extension (`blender_manifest.toml`) | Current standard; supports bundled wheels |
-| Dependencies | **Zero** | Reversal from the previous plan — see §5.2 |
-| Scene units | Millimeters, unit scale 0.001 | Board features are sub-millimeter; the addon sets this up and warns if the scene disagrees |
+| Item | Choice |
+|---|---|
+| Blender | 4.2 LTS minimum, developed on 5.2 LTS |
+| Packaging | Extension (`blender_manifest.toml`) |
+| Dependencies | Zero |
+| Units | Millimeters, unit scale 0.001 — addon sets this up and warns if the scene disagrees |
 
 ---
 
@@ -73,242 +56,190 @@ pcb_generator/
 ├── blender_manifest.toml
 ├── __init__.py                 # registration only
 ├── core/                       # no bpy imports — unit testable
-│   ├── geometry.py             # polygon ops, edge walking, offsets
-│   ├── placement.py            # anchor resolution
-│   ├── routing.py              # plausible-trace generator
-│   └── units.py
-├── data/
-│   ├── board.py                # BoardProperties
-│   ├── component.py            # ComponentProperties
-│   └── library.py              # part manifests
+│   ├── geometry.py             # polygon ops, boundary extraction
+│   ├── routing.py              # trace generator
+│   ├── scatter.py              # part distribution
+│   └── placement.py            # anchors for precise parts
+├── data/                       # PropertyGroups, library manifests
 ├── ops/
-│   ├── board_ops.py            # outline build, fit-to-cavity
-│   ├── place_ops.py            # modal placer, anchor binding
-│   ├── detail_ops.py           # traces, silkscreen, vias, pads
-│   └── cable_ops.py
-├── ui/
-│   ├── panels.py  gizmos.py  overlays.py
-├── shading/
-│   ├── stackup.py              # material builder
-│   └── presets.py              # soldermask colors, finishes
-├── assets/
-│   └── parts.blend
+│   ├── board_ops.py            # the three shape inputs
+│   ├── detail_ops.py           # traces, silkscreen, pads, vias
+│   ├── scatter_ops.py
+│   ├── place_ops.py            # modal placer for notable parts
+│   └── wire_ops.py
+├── ui/                         # panels, gizmos, overlays
+├── shading/                    # stack-up material builder, presets
+├── assets/parts.blend
 └── tests/
 ```
 
-`core/` never imports `bpy`. Geometry, anchor solving, and trace routing are
-plain Python over plain data — testable in milliseconds instead of through a
-Blender launch.
+`core/` never imports `bpy` — geometry, routing, and scatter are plain Python
+over plain data, testable without launching Blender.
 
 ---
 
-## 5. Core subsystems
+## 5. Subsystems
 
-Ordered by how much they matter to the headset case.
+### 5.1 Shape input — three paths
 
-### 5.1 Board outline — including *derived from context*
+All three converge on the same internal representation: **a board surface plus
+its boundary**. Everything downstream is identical regardless of how you got
+there.
 
-Two paths, and the second is the one that matters here.
+**(a) Draw it.** Bézier/poly curve → closed polygon → solidify to thickness
+(default 1.6 mm).
 
-**Drawn:** Bézier/poly curve → validated closed polygon → solidify to thickness
-(default 1.6 mm) → tagged top/bottom/edge faces.
+**(b) Extract curves from an object.** Pull a boundary from existing geometry:
+the open boundary loop of a flat mesh, a planar cross-section through a solid, a
+silhouette from a view direction, or a selected edge loop. Result is a curve you
+can then edit before building — extraction gives you a starting outline, not a
+locked one.
 
-**Derived from context (the important one):** point the addon at a **cavity
-object** (headset shell interior) and a set of **obstacle objects** (the audio
-driver, mounting bosses, ribs). It computes the available planar region at the
-board's placement plane, insets by a clearance value, and produces an outline
-that actually fits.
+**(c) Point at an object that already is the board.** You have a flat mesh
+that's the right shape — make it a PCB in place. Tag its faces top/bottom/edge,
+apply the stack-up, generate detail across its surface. No rebuilding, no
+re-topology; the object's own geometry is the board.
 
-```
-cavity ∩ board_plane  →  available region
-    minus (obstacles ⊕ clearance)  →  legal region
-    minus (keep-out zones)         →  board outline
-    → simplify / fillet corners
-```
+Path (c) has an architectural consequence worth stating up front: **detail
+generation must work on an arbitrary given surface**, not just on outlines the
+addon generated itself. So the trace generator operates in the board's UV/surface
+space and never assumes a shape it produced. That constraint is cheap if it's
+designed in from the start and painful to retrofit — so it's designed in.
 
-This is the feature that answers "next to an audio driver." Rather than
-eyeballing a shape that clears the driver, you declare the driver an obstacle
-and get an outline that provably clears it — and re-clears it when the driver
-moves.
+Boards can be non-flat under (c) — a gently curved board still works, since
+routing is surface-parametric.
 
-Both paths converge on the same polygon representation, so everything
-downstream is identical. Outline is always **regenerated from source**, never
-hand-edited, which is what lets parts re-solve when the shape changes.
+### 5.2 Materials / stack-up
 
-### 5.2 Geometry backend — reversed decision
+A proper layered board shader, not a green diffuse:
 
-The previous plan recommended bundling `shapely` for robust polygon offsetting,
-justified by fabrication-grade correctness.
+FR4 substrate → copper → soldermask → silkscreen → surface finish.
 
-**That justification is gone.** For visualization, offsetting needs to look
-right, not be provably exact — an imperfect miter on a concave corner is
-invisible in a render. Combined with the fact that context-derived outlines lean
-on Blender's own boolean and solidify tools anyway, bundling a wheel is no
-longer worth its install-failure surface.
+Soldermask in green / black / blue / red / white / purple, matte or gloss;
+finish in ENIG gold or HASL silver. Driven by the layer masks §5.3 generates, so
+mask correctly opens over pads and silkscreen sits above it. Presets for the
+common looks, every parameter exposed.
 
-**Decision: zero dependencies.** Hand-rolled offsetting for the simple cases,
-Blender's boolean/curve tools for the rest.
+Lands early — a plain board with good materials already reads better than a
+detailed one with bad materials.
 
-### 5.3 Placement, and anchoring to external geometry
+### 5.3 Procedural detail
 
-This is the headset requirement stated plainly: *tactile switches must sit under
-plastic button caps modeled outside this generator.*
+The single biggest believability win, and where most of the work is.
 
-So the anchor system's most important target isn't the board edge — it's
-**arbitrary scene objects**. Anchor types:
+**Traces.** A deliberately fake router: 45°/90° segments on a coarse grid, bus
+runs following the board's long axis, fan-out from IC packages, via sprinkling,
+ground pour on the reverse. Correctness is irrelevant; *statistics* are
+everything — density, bundle parallelism, and consistent width are what the eye
+reads. Fully seeded, so the same seed gives the same board and you can hunt for
+a layout you like by changing one integer.
 
-| Anchor | Binds to | Use |
-|---|---|---|
-| **`TARGET`** | Any scene object or empty | **Buttons under caps, USB port at shell opening.** The critical one |
-| `EDGE` | Board outline edge, param *t* along it | Connectors that just follow the board's border |
-| `GRID` | Pitch grid (2.54 / 2.00 / 1.27 mm) | Passives, header banks |
-| `RELATIVE` | Another part's frame | Paired parts, LED arrays |
-| `FREE` | Absolute | Everything else |
+Contextual mode: traces preferentially route *between* placed components rather
+than ignoring them, and fan out from their pads. Cheap to implement once parts
+exist, and it's the difference between "traces on a board" and "traces that
+belong to this board."
 
-`TARGET` semantics: bind a part to an object, choose which axes it inherits
-(usually XY from the target, Z from the board plane), plus an offset. Move the
-button cap in the headset model, the tact switch follows. Move the shell, the
-USB port follows.
+**Also generated:** pads with proper finish, vias, silkscreen part outlines and
+reference designators, fiducials, board-edge markings, and text blocks.
 
-Then it runs the other way too: **`TARGET`-anchored parts can drive the
-outline.** If a switch must sit at a given XY and the derived outline doesn't
-reach it, the board grows a tab to cover it. That closes the loop between "the
-product dictates where things are" and "the board is shaped to suit" — which is
-exactly backwards from how EDA tools work, and exactly right here.
+**Output modes.** Texture by default — traces rasterized into the copper and
+mask layers, cheap at any normal render distance. Geometry realizer for
+close-ups, sharing the same routing data, so it's the same board either way.
 
-Solve order: `FREE` → `TARGET` → `EDGE` → `GRID` → `RELATIVE`, dependency-sorted,
-cycles rejected with a clear error. Re-solve is an explicit operator plus an
-opt-in depsgraph handler — auto-solving on every depsgraph update is how addons
-become unusable in real scenes.
+### 5.4 Scattered parts
 
-### 5.4 Visual detail generation — promoted to a core phase
+Fill the board with plausible small hardware: SMD passives (0402/0603/0805),
+small ICs, crystals, inductors, LEDs, test points.
 
-Under the old fab-oriented plan this was cosmetic. Now it's most of the
-believability, and it's the difference between a generated board and a green
-rectangle.
+Seeded and density-driven, with enough rules to avoid looking like confetti:
+grid-ish alignment rather than free rotation, clustering into functional-looking
+groups, respecting margins from the board edge, and keeping clear of precisely
+placed parts and keep-out regions. Paintable density if a uniform spread isn't
+what you want.
 
-**Traces.** A deliberately fake router. Pick pads, route between them on a
-coarse grid with 45°/90° segments, add plausible bus runs along the board,
-fan-out from IC packages, sprinkle vias. Correctness is irrelevant; *statistics*
-are everything — trace density, bundle parallelism, and consistent width are
-what the eye reads. Seeded and deterministic, so a render is reproducible and
-you can hunt for a layout you like by changing one integer.
+This is decoration and treats itself as such — fast to regenerate, easy to
+reroll, no bookkeeping.
 
-Two output modes:
-- **Texture** (default) — traces rasterized into the copper/soldermask layer.
-  Cheap, ships fine at any distance a headset interior will ever be seen from.
-- **Geometry** — real extruded copper for extreme close-ups. Same routing data,
-  different realizer.
+### 5.5 Precisely placed parts
 
-**Also generated:** pads and their finish, vias, silkscreen outlines and
-reference designators, polygon ground pour on the reverse, fiducials, and
-scattered SMD passives to fill empty regions — the last one is a surprisingly
-large believability win for near-zero effort.
+The other half of the split, and where the controls live. Ports, connectors,
+buttons, anything whose position actually matters.
 
-### 5.5 Material / stack-up system
+Placement modes:
 
-A proper layered board shader rather than a green diffuse:
+- **Manual** with snapping — modal operator, live preview, grid/edge snap,
+  rotation in 90° steps, flip side.
+- **Edge-anchored** — bound to a board edge at a parameter along it, oriented
+  outward. Follows the edge if the outline changes.
+- **Target-bound** — bound to an external scene object, inheriting XY from it
+  and Z from the board plane. This is how a tact switch tracks a plastic button
+  cap that's modeled outside the generator: move the cap, the switch follows.
 
-FR4 substrate → copper → soldermask (green / black / blue / red / white / purple,
-matte or gloss) → silkscreen → surface finish (ENIG gold, HASL silver).
+Placed parts are registered as keep-out regions so scatter and routing work
+around them automatically.
 
-Driven by the layer masks §5.4 generates, so soldermask correctly opens over
-pads and silkscreen sits above it. Presets for the common looks, all parameters
-exposed.
+**Seed library**, weighted to what's actually needed: USB-C / USB-A / micro-B,
+tactile switches in several heights, slide switches, FPC/ZIF connectors, JST
+PH/SH, headers, mounting holes, plus the generic fill parts §5.4 uses. Parts are
+collections with custom properties, indexed via the Asset Browser — adding one
+means dropping in a folder, no code.
 
-### 5.6 Parts library
+### 5.6 Wires
 
-Visual fidelity over footprint accuracy — modeled to look right at render
-distance, not to match a datasheet's courtyard.
+Thin point-to-point wire runs — board to driver, board to anything.
 
-Seed set weighted to the headset case:
+Pick a source (a pad, a point on the board, a connector) and a destination (a
+point on another object), get a wire: curve-based, adjustable gauge, insulation
+material, and adjustable slack so it sags and curves like a real wire instead of
+running dead straight. Multiple wires from the same region bundle plausibly
+rather than overlapping.
 
-- **Ports:** USB-C receptacle (the one that matters), USB-A, micro-B
-- **Controls:** tactile switches (several heights, since cap clearance is the
-  whole point), slide switches, rotary encoder
-- **Audio-adjacent:** driver solder pads, spring contacts, FPC/ZIF connectors,
-  JST PH/SH
-- **Generic fill:** SMD passives (0402/0603/0805), LEDs, QFN/QFP/SOIC ICs,
-  crystals, inductors
-- **Mechanical:** M1.6/M2 mounting holes, standoffs, castellated edges
-
-Parts are collections with custom properties, indexed via the Asset Browser.
-Adding a part = dropping in a folder, no code.
-
-### 5.7 Fit checks — mechanical, not electrical
-
-DRC is gone; what replaces it is "does this actually fit in the product":
-
-- Part collides with an obstacle (the audio driver, shell ribs)
-- Board or part protrudes through the cavity wall
-- `TARGET`-anchored part has drifted from its target beyond tolerance —
-  **catches the button-cap misalignment case directly**
-- Component height exceeds available headroom at its location
-- Mounting holes not reachable by their bosses
-
-Reported as a GPU overlay plus a click-to-select list. These are the failures
-that actually show up in a render.
-
-### 5.8 Cables and wire runs
-
-Curve-based: pick a connector or pad, pick a destination, get a wire with
-realistic bevel, gauge, insulation material, and catenary sag. Bundles for
-multi-conductor, plus flat ribbon and FPC flex strips — the latter being what
-usually connects a board to a driver in a real headset.
-
-Scoped modestly: the user's brief says "maybe some wire or something," so this
-targets plausible rather than comprehensive.
-
-### 5.9 Presentation
-
-Small phase, disproportionate payoff for product visuals: cutaway (section
-plane through the assembly), exploded view (parts offset along normals by a
-single slider), and LOD control for background boards.
+Small subsystem, high payoff — a board with two hand-run wires to a driver reads
+as *installed* rather than as a floating asset.
 
 ---
 
 ## 6. Phasing
 
 **Phase 0 — Scaffold (small).** Manifest, registration, N-panel, unit setup, CI
-running `pytest` on `core/`, headless smoke test.
+running `pytest` on `core/`.
 
-**Phase 1 — Board geometry (medium).** Drawn outline, then context-derived
-outline from cavity + obstacles. Thickness, cutouts, fillets, stable edge IDs.
-*Usable: a board that fits the headset cavity and clears the driver.*
+**Phase 1 — Board from shape (medium).** All three input paths, thickness,
+cutouts, face tagging, plus a basic material so there's something to look at.
+*Usable: any shape becomes a board object.*
 
-**Phase 2 — Parts + `TARGET` anchoring (large).** Data model, library, seed
-parts, modal placer, external-object anchoring, outline-follows-target. *Usable:
-switches under the button caps, USB at the shell opening — the actual brief.*
+**Phase 2 — Materials (medium).** Full layered stack-up, soldermask and finish
+presets. *Usable: it looks like a real blank board.*
 
-**Phase 3 — Visual detail (large).** Trace generator, pads, vias, silkscreen,
-ground pour, passive scatter. Texture realizer first, geometry realizer after.
-*Usable: it reads as a real board.*
+**Phase 3 — Procedural detail (large).** Traces, pads, vias, silkscreen, ground
+pour. Texture realizer first. *Usable: it looks like a real populated board from
+any normal distance — this is the phase that sells it.*
 
-**Phase 4 — Materials (medium).** Layered stack-up shader, soldermask and finish
-presets.
+**Phase 4 — Library + precise placement (large).** Data model, seed parts, modal
+placer, edge and target anchors, keep-out registration.
 
-**Phase 5 — Fit checks + cables + presentation (medium).**
+**Phase 5 — Scatter (medium).** Density-driven fill respecting Phase 4's
+keep-outs. Contextual routing turned on, so traces relate to real parts.
 
-**Phase 6 — Polish.** Docs, examples, LOD, possible extension-platform release.
+**Phase 6 — Wires + polish (medium).** Point-to-point wires, LOD, docs, examples.
 
-**Phases 1–3 are the product.** A board that fits its cavity, parts that land
-under their caps, and detail that reads as real — that's the whole brief. 4–6
-are refinement.
+Phases 1–3 stand alone as a useful tool: shape in, believable board out, no
+component work at all. Phase 4 adds the control the brief asks for; 5 and 6
+enrich it.
 
-Notable: the previous plan's Phase 5 (export) is deleted outright, and its
-riskiest item (edge identity across outline edits) drops in severity, since
-`TARGET` anchors bind to external objects that don't churn when the outline
-changes. Edge identity still matters for `EDGE` parts, just less catastrophically.
+Ordering note: precise placement (4) comes before scatter (5) deliberately —
+scatter needs to know what to avoid, and the important parts should claim their
+space first.
 
 ---
 
 ## 7. Testing
 
-- `core/` — pytest, no Blender. Polygon ops, anchor resolution, trace routing
-  determinism (same seed → same layout).
+- `core/` — pytest, no Blender. Boundary extraction, routing determinism (same
+  seed → same layout), scatter distribution properties.
 - Operators — headless `blender --background --python` scripted scenarios.
-- Visual — reference renders of a fixed scene, compared per release. Loose
-  thresholds; this catches "the shader broke," not sub-pixel drift.
+- Visual — reference renders of a fixed scene compared per release, loose
+  thresholds. Catches "the shader broke," not sub-pixel drift.
 - CI — Blender 4.2 LTS and 5.2 LTS.
 
 ---
@@ -317,15 +248,8 @@ changes. Edge identity still matters for `EDGE` parts, just less catastrophicall
 
 | Risk | Mitigation |
 |---|---|
-| Traces look procedurally fake — the failure mode that undermines everything | Prototype the router in Phase 3 against reference photos early; tune on density and bundling, not on rule count |
-| Context-derived outlines produce garbage on complex cavities | Always allow falling back to a drawn outline; treat derivation as a starting point that can be frozen and edited |
-| `TARGET` bindings break when the headset model is restructured | Bind by object reference with a name fallback; report broken bindings loudly rather than silently reverting to last position |
-| Library scope creep | Seed set is deliberately small and headset-weighted; user-authored parts are a first-class path |
-| Texture resolution insufficient for close-ups | Geometry realizer shares the routing data — same source, different output |
-
----
-
-## Sources
-
-- [How to Create Extensions — Blender 5.2 LTS Manual](https://docs.blender.org/manual/en/latest/advanced/extensions/getting_started.html)
-- [Add-on Development Setup — Blender Developer Documentation](https://developer.blender.org/docs/handbook/extensions/addon_dev_setup/)
+| Traces look procedurally fake — the failure that undermines the whole tool | Prototype the router early in Phase 3 against reference photos; tune density and bundling, not rule count |
+| Boundary extraction fails on messy real-world meshes | Extraction outputs an editable curve, never a locked result; drawn outline is always available as fallback |
+| Scatter reads as noise rather than circuitry | Alignment and clustering rules from the start, not uniform random; paintable density as the escape hatch |
+| Texture resolution insufficient for close-ups | Geometry realizer shares routing data — same source, different output |
+| Detail generation assumes addon-built geometry, breaking path (c) | Surface-parametric routing designed in from the start (§5.1) |
