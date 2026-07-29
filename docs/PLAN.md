@@ -1,7 +1,19 @@
 # Blender PCB Generator — Build Plan
 
-Status: **draft, revised for the simplified brief.** Open decisions in
-[OPEN-QUESTIONS.md](OPEN-QUESTIONS.md).
+Status: **v1 built.** The whole pipeline works end to end. Open decisions in
+[OPEN-QUESTIONS.md](OPEN-QUESTIONS.md); what is deliberately still missing is in
+§9.
+
+| Phase | State |
+|---|---|
+| 0 — Scaffold, extension manifest, CI | done |
+| 1 — Board from all three shape inputs | done |
+| 2 — Layered materials, mask and finish presets | done |
+| 3 — Traces, vias, pads, silkscreen, pour | done |
+| 4 — Part library, precise placement, anchors | done |
+| 5 — Scatter | done |
+| 6 — Wires | done |
+| Polish — LOD, cutaway, presets, docs | not started |
 
 ---
 
@@ -246,10 +258,37 @@ space first.
 
 ## 8. Risks
 
-| Risk | Mitigation |
+| Risk | How it turned out |
 |---|---|
-| Traces look procedurally fake — the failure that undermines the whole tool | Prototype the router early in Phase 3 against reference photos; tune density and bundling, not rule count |
-| Boundary extraction fails on messy real-world meshes | Extraction outputs an editable curve, never a locked result; drawn outline is always available as fallback |
-| Scatter reads as noise rather than circuitry | Alignment and clustering rules from the start, not uniform random; paintable density as the escape hatch |
-| Texture resolution insufficient for close-ups | Geometry realizer shares routing data — same source, different output |
-| Detail generation assumes addon-built geometry, breaking path (c) | Surface-parametric routing designed in from the start (§5.1) |
+| Traces look procedurally fake | Held up. Two things mattered more than the routing rules: layering (a single-layer router deadlocks at ~17% routed) and getting the *material* right — copper under mask reads darker and glossier, and making it lighter instead turns traces into stuck-on tape |
+| Boundary extraction fails on messy meshes | Three strategies with fallback (wire edges → boundary edges → planar section) covers curves, flat meshes and closed solids |
+| Scatter reads as noise rather than circuitry | Clustering plus 90-degree rotation snap was enough |
+| Texture resolution insufficient for close-ups | Sidestepped — detail is geometry, so there is no resolution ceiling and no texture path to maintain |
+| Detail generation assumes addon-built geometry | Handled by adopting objects in place and shrinkwrapping detail onto non-flat boards |
+
+Three bugs that only surfaced by rendering, worth remembering:
+
+- BMesh element identity does not survive the face table reallocating, so
+  tracking "faces added since" with a set silently matches everything. Index
+  ranges are the only reliable way.
+- Clearing a mesh's material slots resets every face's `material_index`. Slots
+  have to exist *before* the geometry arrives.
+- `bmesh.ops.solidify` does not extrude in the direction its sign implies. The
+  board normalises its own top surface to z=0 rather than trusting it.
+
+---
+
+## 9. Deliberately not built yet
+
+Everything in §5 is implemented except:
+
+- **Reference designator text** — silkscreen draws component outlines, board
+  border and fiducial ticks, but no `R12`-style labels. Text objects are
+  expensive at scatter counts and mostly illegible at render distance; worth
+  adding only if close-ups need it.
+- **Paintable scatter density** — density is global per board. A weight-map
+  approach would let you thin out a region by hand.
+- **Cutaway and exploded presentation** — §5.9. Both are small and independent.
+- **LOD control** for background boards.
+- **Bottom-side scatter.** Bottom-side *routing* is generated; filler parts are
+  top-only, pending the double-sided question.

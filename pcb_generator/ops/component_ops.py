@@ -25,11 +25,20 @@ _PART_ITEMS_CACHE: List[Tuple[str, str, str]] = []
 def _part_items(self, context):
     _PART_ITEMS_CACHE.clear()
 
+    first = True
     for category in library.categories():
         parts = [p for p in library.notable_parts() if p.category == category]
         if not parts:
             continue
-        _PART_ITEMS_CACHE.append(("", category, ""))
+
+        # Separators go *between* categories only. A leading separator becomes
+        # item zero, so the enum's default resolves to the empty identifier and
+        # the operator fails the moment anyone runs it without opening the
+        # dropdown first.
+        if not first:
+            _PART_ITEMS_CACHE.append(("", category, ""))
+        first = False
+
         for part in parts:
             _PART_ITEMS_CACHE.append(
                 (
@@ -44,6 +53,16 @@ def _part_items(self, context):
         _PART_ITEMS_CACHE.append(("NONE", "No parts", ""))
 
     return _PART_ITEMS_CACHE
+
+
+def _resolve_part_key(key: str, scene_props) -> str:
+    """Fall back to something real if the enum handed us a separator."""
+    if key and library.get(key) is not None:
+        return key
+    if library.get(scene_props.add_part_key) is not None:
+        return scene_props.add_part_key
+    notable = library.notable_parts()
+    return notable[0].key if notable else ""
 
 
 def _board_plane_point(
@@ -105,6 +124,7 @@ class PCB_OT_add_component(Operator):
     def execute(self, context):
         board = properties.find_board(context)
         scene_props = context.scene.pcb
+        part_key = _resolve_part_key(self.part_key, scene_props)
 
         target = scene_props.add_target if self.anchor == "TARGET" else None
         if self.anchor == "TARGET" and target is None:
@@ -120,7 +140,7 @@ class PCB_OT_add_component(Operator):
 
         obj = components_build.create_component(
             board,
-            self.part_key,
+            part_key,
             position=position,
             rotation=self.rotation,
             anchor=self.anchor,
@@ -128,13 +148,13 @@ class PCB_OT_add_component(Operator):
             side=self.side,
         )
         if obj is None:
-            self.report({"ERROR"}, f"Unknown part '{self.part_key}'.")
+            self.report({"ERROR"}, f"Unknown part '{part_key}'.")
             return {"CANCELLED"}
 
-        scene_props.add_part_key = self.part_key
+        scene_props.add_part_key = part_key
         _make_active(context, obj)
 
-        self.report({"INFO"}, f"Added {obj.pcb_component.ref} ({self.part_key}).")
+        self.report({"INFO"}, f"Added {obj.pcb_component.ref} ({part_key}).")
         return {"FINISHED"}
 
 
@@ -161,6 +181,7 @@ class PCB_OT_place_component(Operator):
     _rotation: float = 0.0
     _edge_snap: bool = False
     _side: str = "TOP"
+    _key: str = ""
 
     @classmethod
     def poll(cls, context):
@@ -179,12 +200,13 @@ class PCB_OT_place_component(Operator):
         self._rotation = 0.0
         self._edge_snap = False
         self._side = "TOP"
+        self._key = _resolve_part_key(self.part_key, context.scene.pcb)
 
         self._obj = components_build.create_component(
-            self._board, self.part_key, position=(0.0, 0.0), anchor="FREE"
+            self._board, self._key, position=(0.0, 0.0), anchor="FREE"
         )
         if self._obj is None:
-            self.report({"ERROR"}, f"Unknown part '{self.part_key}'.")
+            self.report({"ERROR"}, f"Unknown part '{self._key}'.")
             return {"CANCELLED"}
 
         context.window_manager.modal_handler_add(self)
@@ -234,7 +256,7 @@ class PCB_OT_place_component(Operator):
         outer, _ = properties.load_outline(self._board)
 
         if self._edge_snap and len(outer) >= 3:
-            part = library.get(self.part_key)
+            part = library.get(self._key)
             spec = core_placement.bind_to_edge(outer, (point.x, point.y))
             spec.edge_offset = -(part.depth * 0.5 if part else 0.0)
             spec.rotation = self._rotation
