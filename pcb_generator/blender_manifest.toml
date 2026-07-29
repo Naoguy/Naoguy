@@ -1,0 +1,18 @@
+schema_version = "1.0.0"
+
+id = "pcb_generator"
+version = "0.1.0"
+name = "PCB Generator"
+tagline = "Turn any shape into a believable PCB for renders"
+maintainer = "Naoguy"
+type = "add-on"
+
+license = ["SPDX:GPL-3.0-or-later"]
+
+blender_version_min = "4.2.0"
+
+tags = ["Add Mesh", "Material", "Modeling"]
+
+website = "https://github.com/Naoguy/Naoguy"
+
+[permissions]
