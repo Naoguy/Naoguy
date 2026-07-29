@@ -1,92 +1,88 @@
 # Open Questions
 
-Decisions that change the shape of the build. Roughly in order of how much they
-cost to change later.
+Revised after the scope pivot to visualization-only. The previous round's
+questions about fab output, KiCad, and export fidelity are resolved and removed.
 
 ---
 
-### Q1 — What is the output actually for? *(blocks Phase 5, shapes everything)*
+## Answered
 
-- **(a) Mechanical/ID tool** — outline + connector placement is the source of
-  truth, exported to KiCad for the electrical work. Export fidelity matters
-  enormously; render quality is secondary.
-- **(b) Visualization** — mockups, product renders, enclosure fitting. Nothing
-  goes to fab. Materials and part realism matter; DXF/KiCad export barely does.
-- **(c) Both**, with (a) leading.
-
-The plan currently assumes **(a)**. If it's really (b), Phase 5 shrinks to
-almost nothing and Phase 2's library needs far more visual fidelity instead.
+- **Purpose** — visualization first, foremost, possibly solely. No fabrication
+  output. Removes an entire phase from the plan.
+- **Dependencies** — `shapely` no longer justified once exactness stops
+  mattering. Zero dependencies.
+- **Driving case** — headset internal PCB: next to an audio driver, USB port,
+  tact switches under externally-modeled plastic caps, possibly a wire run.
 
 ---
 
-### Q2 — How do you want to draw the shape?
+## Blocking
 
-- Bézier/poly **curve** object (most precise, dimension-driven)
-- **Grease Pencil** sketch, auto-fitted (fastest, loosest)
-- **Mesh** face boundary (familiar to box-modelers)
-- Parametric **primitives** + boolean ops (rounded rect, D-shape, etc.)
+### Q1 — How does the addon see the headset model?
 
-Plan supports curve first, others after. Worth knowing which one you'd actually
-reach for, since that one should be excellent rather than merely present.
+The whole context-derived-outline and `TARGET`-anchor design assumes the
+surrounding geometry is *in the scene* and readable.
 
----
+- Is the headset already modeled in Blender, or coming from CAD (STEP/OBJ/FBX)?
+- Is the audio driver a real solid, or a placeholder?
+- For button caps: is there anything I can bind to — an empty, a named object,
+  a marked face — or would you be placing switches by eye against a visual
+  reference?
 
-### Q3 — Which parts matter to you first?
+If the caps are bindable objects, Phase 2 delivers the brief almost by itself.
+If they're not, the first useful step is a small workflow for *marking* target
+points on existing geometry, which is a different (smaller) piece of work.
 
-The seed library list in PLAN.md §5.3 is a guess. If there's a specific project
-driving this — a particular connector set, a form factor, a board family — that
-list should be replaced with the real one. Building 40 parts nobody needs while
-missing the one you do is the easiest way to waste Phase 2.
+### Q2 — How close does the camera get?
 
----
+This sets the fidelity budget for everything in Phase 3.
 
-### Q4 — Bundle `shapely`, or stay dependency-free?
+- **Background/context** — visible through a cutaway or in an exploded diagram,
+  never hero. Texture traces are plenty; no geometry realizer needed.
+- **Mid** — clearly readable, fills part of frame. Texture traces at high
+  resolution, real geometry for parts.
+- **Hero close-up** — individual components legible. Needs the geometry
+  realizer, proper pad finishes, and much more part detail.
 
-Bundling gives correct polygon offsetting for free but adds a wheel (~5 MB) and
-an install-failure surface. Dependency-free means hand-rolling offsetting, which
-is a real source of subtle bugs on concave shapes.
+I've planned for mid with a path to hero. If it's genuinely background-only,
+Phase 3 shrinks by half.
 
-Plan recommends **bundling**. Cheap to reverse early, expensive later.
+### Q3 — Single- or double-sided?
 
----
-
-### Q5 — How much does KiCad specifically matter?
-
-Writing `.kicad_pcb` directly is meaningfully more work than DXF + a placement
-CSV, and it's version-sensitive. If KiCad is *the* downstream tool, it's worth
-it. If the workflow is "import outline as Edge.Cuts and place by hand anyway,"
-DXF + CSV is plenty and Phase 5 gets much shorter.
-
-Also: does anything need to come *back* from KiCad (footprint positions changed
-during layout)? Round-trip is a much bigger commitment than one-way export and
-isn't in the current plan.
+Double-sided doubles part placement UI, adds bottom-side trace generation, and
+matters a lot for a thin headset cavity where the board is sandwiched. Real
+headset boards are usually populated both sides — but if the reverse is never
+visible in your shots, it's free to skip.
 
 ---
 
-### Q6 — Enclosure cutout generation: core feature or nice-to-have?
+## Non-blocking
 
-Generating boolean solids from connector openings so you can subtract them from
-a case is, I think, the feature that makes this worth doing in Blender
-specifically rather than in an EDA tool. It's listed as Phase 5 P1.
+### Q4 — Rigid board, or flex/rigid-flex?
 
-If you agree it's central, it should move earlier — arguably right after
-Phase 2 — because it changes what metadata every library part needs to carry,
-and retrofitting metadata across a built library is annoying.
+Headsets very often use a flex ribbon from the main board to the driver, and
+your "maybe some wire or something" might really be a flex tail. Flex means the
+outline extrudes along a *curved* path rather than a flat plane — a meaningful
+addition to Phase 1, but self-contained and deferrable.
 
----
+Cheap version: a rigid board plus a separate FPC strip part (already in the
+Phase 5 cable work). Expensive version: true rigid-flex with bend regions.
 
-### Q7 — Blender version floor
+### Q5 — One board, or a family?
 
-Plan targets 4.2 LTS minimum. Dropping to 5.x-only removes a compatibility
-burden and unlocks newer APIs. Supporting anything below 4.2 means maintaining
-the legacy `bl_info` addon path alongside the extension manifest — not
-recommended.
+Building this for a single headset PCB versus building a tool you'll reuse
+across products changes how much goes into the library and preset system. If
+it's one board, some of Phase 6 is pointless and Phase 2's library shrinks to
+just the parts you need.
 
----
+### Q6 — Soldermask color and finish?
 
-### Q8 — Who else uses this?
+Trivially changeable later, but if the headset has an established look —
+matte black board with ENIG gold, say — I'd rather build the material presets
+around it than around generic green.
 
-Just you, or is this meant to be published to the Blender extensions platform?
-Publishing implies docs, versioned releases, a support surface, and stricter
-dependency hygiene. It's a real cost and worth deciding before Phase 0 rather
-than after.
+### Q7 — Does the board need mounting features?
+
+Screw bosses, snap tabs, castellations, alignment notches. Visible in a cutaway,
+invisible otherwise. Affects the seed library and the fit checks, not the
+architecture.

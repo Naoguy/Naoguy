@@ -1,12 +1,16 @@
 # Blender PCB Generator
 
-A Blender extension for designing PCBs shape-first: draw an arbitrary board
-outline, populate it with connectors, ports, and controls that carry placement
-*rules* rather than fixed coordinates, then export the outline and placement
-downstream to an EDA tool.
+A Blender extension for generating **believable PCBs for renders** — boards
+shaped to fit a specific product cavity, populated with parts that land exactly
+where the surrounding hardware needs them.
 
-The premise: Blender is good at shape and EDA tools are not. This inverts the
-usual order — mechanical intent first, electrical layout second.
+Library PCB models never fit: wrong outline, wrong size, connectors in the wrong
+place, no relationship to the product they're supposed to live inside. This
+generates one that belongs.
+
+Driving case: a PCB inside a headset, next to an audio driver, with a USB port
+at a shell opening and tactile switches sitting under externally-modeled plastic
+button caps.
 
 **Status:** planning. No code yet.
 
@@ -15,7 +19,11 @@ usual order — mechanical intent first, electrical layout second.
 
 ## Scope
 
-Owns: board outline geometry, mechanical constraints, modular part placement,
-clearance checks, enclosure interface geometry.
+**Owns:** board outline (drawn, or derived from a cavity and its obstacles),
+part placement anchored to external scene geometry, procedural visual detail
+(traces, silkscreen, pads, vias), board materials, mechanical fit checks,
+cables.
 
-Does not own: traces, netlists, routing, copper, simulation, Gerbers.
+**Does not own:** fabrication output of any kind, electrical correctness,
+netlists, real routing, EDA interoperability — or the enclosure itself, which is
+read as context rather than generated.
